@@ -1,2 +1,2 @@
 # Sparse-PCA-Critical-Assessment
-Critical assessment on sparse PCA research
+Critical assessment on sparse PCA, weights, loadings and singular vectors
