@@ -1,29 +1,22 @@
-# autism_anova: sparse W #
-# initiated: 30-may-2021
+# autism_anova: 36 nonzero coefficients #
 
-# seed 4360 #
+# the data is availble on the NCBI GEO database (accession code GSE7329)
 
-# initial background #
-# i do anova to find out which variable is important at discerning the groups of autism
-# taking those important variables, and i combine with 1000 randomly drawn redundant variables, 
-# and perform sparse PCA
-
-# SPARSE WEIGHTS: MODEL SELECTION VIA CROSS VALIDATION (EIGENVECTOR METHOD) #
+# these results are provided in the appendix
 
 # 0. load package, data, functions ####
 
 library(RegularizedSCA)
 library(rgl)
 
-setwd("E:\\Users\\park\\Desktop\\spca_optimism_empirical\\")
+setwd("C:\\Users\\park\\Desktop\\research\\project_spca_models\\industry\\sim_28_jan_2020\\")
 
-source("./spca_adj_lasso.R")
-source("./paper1_uslpca.R")
-source("./eigenvectorCV_adapted.R")
+source("../../functions/spca_adj_lasso.R")
+source("../../functions/paper1_uslpca.R")
 
 
 # load data #
-dat <- read.table("./GSE7329_series_matrix_processed.txt",
+dat <- read.table("C:\\Users\\park\\Desktop\\research\\project_spca_models\\industry\\empirical\\autism\\GSE7329_series_matrix_processed.txt",
                   header = T)
 
 # 1. data pre-processing ####
@@ -128,75 +121,16 @@ colnames(dat_subset)[1]
 
 colnames(dat)[322]
 
-
-# 4. W-svd cross validation ####
-time1 <- Sys.time()
-
-nonzero_range <- c(5,
-                   seq(from = 10, to = 300, by = 10), 
-                   seq(from = 400, to = 1000, by = 100))
-
-cv_seeds <- sample(1:1000, length(nonzero_range), replace = F)
-
-svd_W_CV <- vector("list", length(nonzero_range))
-
-
-for (i in 1:length(nonzero_range)){
-  
-  svd_W_CV[[i]] <- EigenVectorCV2_spca(dat = dat_subset, 
-                                       ncomp = 3, 
-                                       ridge = 1e-6, 
-                                       nonzero = nonzero_range[i],
-                                       zerocolumns = F, 
-                                       nrFolds = 10, 
-                                       nScale = 0,
-                                       nrStarts = NULL, 
-                                       scaleDat = F, 
-                                       seed_method = 1,
-                                       seed_cv = cv_seeds[i], 
-                                       inits = "SVD")
-  
-  svd_W_CV[[i]]$nonzero <- nonzero_range[i]
-  
-  print(rep(i, 10))
-  
-  save(svd_W_CV, file = "./autism_W_svd_CV_seed4360.Rdata")
-}
-
-time2 <- Sys.time()
-
-
-
-MSE <- unlist(lapply(svd_W_CV, FUN = function(x) { x$MSE }))
-stdError <- unlist(lapply(svd_W_CV, FUN = function(x) { x$stdError }))
-df <- data.frame(MSE, stdError)
-
-serule <- df[which.min(df$MSE),1] + df[which.min(df$MSE),2]
-
-df[df$MSE < serule,]
-
-
-ggplot(df, aes(x=nonzero_range, y=MSE)) +
-  geom_point() +
-  geom_errorbar(aes(ymin=MSE-stdError, ymax=MSE+stdError)) +
-  geom_line(y = min(df$MSE) + df$stdError[which.min(df$MSE)], linetype="dotted", color="red") +
-  theme_bw()
-
-nonzero_range[4] # 30 nonzero chosen
-
-
-# 5. applying the methods (W-svd, W-multi, P-svd, P-multi) with 20 nonzero coefficients ####
-
-CV_chosen <- data.frame(nonzero = 30)
+# 4. applying the methods (W-svd, W-multi, P-svd, P-multi) with 36 nonzero coefficients ####
 
 # P svd #
 P_svd <- spca_P_cardinality(X = dat_subset, R = 3, 
-                            P = NULL, n_zeros = ncol(dat_subset) - CV_chosen$nonzero, 
+                            P = NULL, n_zeros = ncol(dat_subset) - 36, 
                             MAXITER = 100000, stop_value = 1e-13, 
                             inits = "SVD", seed = 1)
 
 P_svd_vaf <- 1 - sum((dat_subset - P_svd$Tmat %*% t(P_svd$P))^2) / sum(dat_subset^2) 
-# 3.9% explained
+# 6.344% explained
 
 P_svd_nonzero <- colSums(P_svd$P != 0)[1]
 
@@ -204,11 +138,11 @@ P_svd_nonzero <- colSums(P_svd$P != 0)[1]
 
 P_multi <- list()
 
-for (MULTI in 1:30){
+for (MULTI in 1:50){
   
   P_multi[[MULTI]] <- spca_P_cardinality(X = dat_subset, R = 3, 
                                          P = NULL, 
-                                         n_zeros = ncol(dat_subset) - CV_chosen$nonzero, 
+                                         n_zeros = ncol(dat_subset) - 36, 
                                          MAXITER = 100000, stop_value = 1e-13, 
                                          inits = "multistart", 
                                          nrstart = 1,  seed = MULTI)
@@ -225,12 +159,12 @@ P_multi_final <- P_multi[[minloss_index]]
 P_multi_nonzero <- colSums(P_multi_final$P != 0)[1]
 
 P_multi_vaf <- 1 - sum((dat_subset - P_multi_final$Tmat %*% t(P_multi_final$P))^2) / sum(dat_subset^2) 
-# 4.5% explained
+# 7.234% explained
 
 # W svd #
 
 W_svd <- spca_adj_lasso(x = dat_subset, K = 3, 
-                        para = rep(CV_chosen$nonzero, 3), 
+                        para = rep(36, 3), 
                         type = "predictor", 
                         sparse = "varnum", 
                         inits = "SVD", seed = 1, 
@@ -239,16 +173,16 @@ W_svd <- spca_adj_lasso(x = dat_subset, K = 3,
 W_svd_zero <- colSums(W_svd$Wraw != 0)[1]
 
 w_svd_vaf <- 1 - sum((dat_subset - dat_subset %*% W_svd$Wraw %*% t(W_svd$Pmat))^2) / sum(dat_subset^2) 
-# 35.3% variance explained
+# 36.628% variance explained
 
 # W multi #
 
 W_multi <- list()
 
-for (MULTI in 1:30){
+for (MULTI in 1:50){
   
   W_multi[[MULTI]] <- spca_adj_lasso(x = dat_subset, K = 3, 
-                                     para = rep(CV_chosen$nonzero, 3), 
+                                     para = rep(36, 3), 
                                      type = "predictor", 
                                      sparse = "varnum", 
                                      inits = "multistart", 
@@ -266,7 +200,7 @@ minloss_index <- which.min(losses) # 25th start led to the smallest loss
 W_multi_final <- W_multi[[minloss_index]]
 
 
-# variance accounted for: 35.3% (same as SVD-start)
+# variance accounted for: 36.628 (same as SVD-start)
 W_multi_vaf <- 1 - sum((dat_subset - dat_subset %*% W_multi_final$Wraw %*% t(W_multi_final$Pmat))^2) / sum(dat_subset^2) 
 
 
@@ -302,16 +236,12 @@ WP_multi_corrects <- corrects(W_multi_final$Wraw, P_multi_final$P, total = ncol(
 
 P_corrects <- corrects(P_svd$P, P_multi_final$P, total = ncol(dat_subset)*3)
 
-W_nonzero <- nonzero(W_multi_final$Wraw, W_svd$Wraw, nonzeros = CV_chosen$nonzero*3)
+W_nonzero <- nonzero(W_multi_final$Wraw, W_svd$Wraw, nonzeros = 36*3)
 
-WP_svd_nonzero <- nonzero(W_svd$Wraw, P_svd$P, nonzeros = CV_chosen$nonzero*3)
+WP_svd_nonzero <- nonzero(W_svd$Wraw, P_svd$P, nonzeros = 36*3)
 
-WP_multi_nonzero <- nonzero(W_multi_final$Wraw, P_multi_final$P, nonzeros = CV_chosen$nonzero*3)
+WP_multi_nonzero <- nonzero(W_multi_final$Wraw, P_multi_final$P, nonzeros = 36*3)
 
-P_nonzero <- nonzero(P_svd$P, P_multi_final$P, nonzeros = CV_chosen$nonzero*3)
+P_nonzero <- nonzero(P_svd$P, P_multi_final$P, nonzeros = 36*3)
 
 
-# save(dat_subset, seed, CV_chosen, type,
-#      nonzero_range, svd_W_CV, df,
-#      W_svd, W_multi, W_multi_final, P_svd, P_multi, P_multi_final,
-#      file = "./autism_seed4360_W_CV_results.Rdata")

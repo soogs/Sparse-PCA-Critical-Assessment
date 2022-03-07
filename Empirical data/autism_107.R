@@ -1,42 +1,26 @@
-# autism data: model selection iva Index of Sparseness for sparse loadings #
-# 31-may-2021 #
-# soogeun park #
+# autism_anova: 107 nonzero coefficients #
 
-# seed 4360 #
+# the data is availble on the NCBI GEO database (accession code GSE7329)
+
+# initial background #
+# we do anova to find out which variable is important at discerning the groups of autism
+# taking those important variables, and i combine with 1000 randomly drawn redundant variables, 
+# and perform sparse PCA
+
+# We estimate 107 nonzero coefficients
 
 # 0. load package, data, functions ####
 
 library(RegularizedSCA)
 library(rgl)
 
-setwd("E:\\Users\\park\\Desktop\\spca_optimism_empirical\\")
-
-source("./spca_adj_lasso.R")
-source("./paper1_uslpca.R")
-source("./eigenvectorCV_adapted.R")
-source("./Index_of_Sparseness.R")
-
-corrects <- function(A, B, total){
-  tucker <- RegularizedSCA::TuckerCoef(A, B)
-  ratio <- (sum((abs(A) > 1e-7) + (abs(B[,tucker$perm]) > 1e-7) == 2) + 
-              sum((abs(A) < 1e-7) + (abs(B[,tucker$perm]) < 1e-7) == 2)) / (total)
-  return(ratio)
-}
-
-
-nonzero <- function(A, B, nonzeros){
-  tucker <- RegularizedSCA::TuckerCoef(A, B)
-  ratio <- sum((abs(A) > 1e-7) + 
-                 (abs(B[,tucker$perm]) > 1e-7) == 2) / (nonzeros)
-  return(ratio)
-}
-
-
+source("../Functions/spca_adj_lasso.R")
+source("../Functions/paper1_uslpca.R")
 
 
 # load data #
-dat <- read.table("./GSE7329_series_matrix_processed.txt",
-                  header = T)
+# dat <- read.table("C:\\Users\\park\\Desktop\\research\\project_spca_models\\industry\\empirical\\autism\\GSE7329_series_matrix_processed.txt",
+#                   header = T)
 
 # 1. data pre-processing ####
 
@@ -127,9 +111,11 @@ length(which(pvalues_adj > 0.5) )
 
 largerthan050 <- which(as.vector(pvalues_adj) > 0.5)
 
-# 3. seeding and sampling ####
-set.seed(4360)
-  
+# 3. setting seed ####
+set.seed(4360) 
+
+# let's take 1000 more probes to see if that is in any way feasible
+
 redundant <- sample(x = largerthan050, size = 1000)
 
 dat_subset <- dat[,c(important, redundant)]
@@ -138,37 +124,16 @@ colnames(dat_subset)[1]
 
 colnames(dat)[322]
 
-# 4. Sparse P model selection: index of sparseness ####
+# 4. applying the methods (W-svd, W-multi, P-svd, P-multi) with 107 nonzero coefficients ####
 
-nonzero_range <- c(seq(from = 5, to = 275, by = 20),
-                   c(285, 295, 305, 315, 325, 335, 345),
-                   seq(from = 355, to = 1015, by = 50), 
-                   1017)
-
-P_svd_IS <- data.frame(nonzero = NA, IS = NA)
-
-for (i in 1:length(nonzero_range)){
-  
-  P_svd_IS[i,]$IS  <- index_sparseness(dat = dat_subset, ncomp = 3, nonzero = nonzero_range[i], 
-                                       inits = "SVD", nrstart = NULL, seed_method = 1)
-  
-  P_svd_IS[i,]$nonzero <- nonzero_range[i]
-  
-  print(i)
-}
-
-IS_chosen <- P_svd_IS[which.max(P_svd_IS$IS),]
-
-
-# 5. applying the chosen number of nonzero coefficients on the methods ####
 # P svd #
 P_svd <- spca_P_cardinality(X = dat_subset, R = 3, 
-                            P = NULL, n_zeros = ncol(dat_subset) - IS_chosen$nonzero, 
+                            P = NULL, n_zeros = ncol(dat_subset) - 107, 
                             MAXITER = 100000, stop_value = 1e-13, 
                             inits = "SVD", seed = 1)
 
 P_svd_vaf <- 1 - sum((dat_subset - P_svd$Tmat %*% t(P_svd$P))^2) / sum(dat_subset^2) 
-# 27.85% variance explained
+# 16.29909% explained
 
 P_svd_nonzero <- colSums(P_svd$P != 0)[1]
 
@@ -176,11 +141,11 @@ P_svd_nonzero <- colSums(P_svd$P != 0)[1]
 
 P_multi <- list()
 
-for (MULTI in 1:30){
+for (MULTI in 1:50){
   
   P_multi[[MULTI]] <- spca_P_cardinality(X = dat_subset, R = 3, 
                                          P = NULL, 
-                                         n_zeros = ncol(dat_subset) - IS_chosen$nonzero, 
+                                         n_zeros = ncol(dat_subset) - 107, 
                                          MAXITER = 100000, stop_value = 1e-13, 
                                          inits = "multistart", 
                                          nrstart = 1,  seed = MULTI)
@@ -197,12 +162,12 @@ P_multi_final <- P_multi[[minloss_index]]
 P_multi_nonzero <- colSums(P_multi_final$P != 0)[1]
 
 P_multi_vaf <- 1 - sum((dat_subset - P_multi_final$Tmat %*% t(P_multi_final$P))^2) / sum(dat_subset^2) 
-# 27.91% variance explained
+# 16.42596% explained
 
 # W svd #
 
 W_svd <- spca_adj_lasso(x = dat_subset, K = 3, 
-                        para = rep(IS_chosen$nonzero, 3), 
+                        para = rep(107, 3), 
                         type = "predictor", 
                         sparse = "varnum", 
                         inits = "SVD", seed = 1, 
@@ -211,16 +176,16 @@ W_svd <- spca_adj_lasso(x = dat_subset, K = 3,
 W_svd_zero <- colSums(W_svd$Wraw != 0)[1]
 
 w_svd_vaf <- 1 - sum((dat_subset - dat_subset %*% W_svd$Wraw %*% t(W_svd$Pmat))^2) / sum(dat_subset^2) 
-# 35.33% variance explained
+# 36.628% variance explained
 
 # W multi #
 
 W_multi <- list()
 
-for (MULTI in 1:30){
+for (MULTI in 1:50){
   
   W_multi[[MULTI]] <- spca_adj_lasso(x = dat_subset, K = 3, 
-                                     para = rep(IS_chosen$nonzero, 3), 
+                                     para = rep(107, 3), 
                                      type = "predictor", 
                                      sparse = "varnum", 
                                      inits = "multistart", 
@@ -233,16 +198,30 @@ for (MULTI in 1:30){
 
 losses <- unlist(lapply(W_multi, function(x){x$loss}))
 
-minloss_index <- which.min(losses) # 13th start led to the smallest loss
+minloss_index <- which.min(losses) # 25th start led to the smallest loss
 
 W_multi_final <- W_multi[[minloss_index]]
 
 
-# variance accounted for: 35.7% (same as SVD-start)
+# variance accounted for: 36.628 (same as SVD-start)
 W_multi_vaf <- 1 - sum((dat_subset - dat_subset %*% W_multi_final$Wraw %*% t(W_multi_final$Pmat))^2) / sum(dat_subset^2) 
 
 
-# 6. comparing the results ####
+# comparing the results between the methods #
+corrects <- function(A, B, total){
+  tucker <- RegularizedSCA::TuckerCoef(A, B)
+  ratio <- (sum((abs(A) > 1e-7) + (abs(B[,tucker$perm]) > 1e-7) == 2) + 
+              sum((abs(A) < 1e-7) + (abs(B[,tucker$perm]) < 1e-7) == 2)) / (total)
+  return(ratio)
+}
+
+
+nonzero <- function(A, B, nonzeros){
+  tucker <- RegularizedSCA::TuckerCoef(A, B)
+  ratio <- sum((abs(A) > 1e-7) + 
+                 (abs(B[,tucker$perm]) > 1e-7) == 2) / (nonzeros)
+  return(ratio)
+}
 
 W_tucker <- TuckerCoef(W_svd$Wraw, W_multi_final$Wraw)$tucker_value
 
@@ -260,109 +239,11 @@ WP_multi_corrects <- corrects(W_multi_final$Wraw, P_multi_final$P, total = ncol(
 
 P_corrects <- corrects(P_svd$P, P_multi_final$P, total = ncol(dat_subset)*3)
 
-W_nonzero <- nonzero(W_multi_final$Wraw, W_svd$Wraw, nonzeros = IS_chosen$nonzero*3)
+W_nonzero <- nonzero(W_multi_final$Wraw, W_svd$Wraw, nonzeros = 107*3)
 
-WP_svd_nonzero <- nonzero(W_svd$Wraw, P_svd$P, nonzeros = IS_chosen$nonzero*3)
+WP_svd_nonzero <- nonzero(W_svd$Wraw, P_svd$P, nonzeros = 107*3)
 
-WP_multi_nonzero <- nonzero(W_multi_final$Wraw, P_multi_final$P, nonzeros = IS_chosen$nonzero*3)
+WP_multi_nonzero <- nonzero(W_multi_final$Wraw, P_multi_final$P, nonzeros = 107*3)
 
-P_nonzero <- nonzero(P_svd$P, P_multi_final$P, nonzeros = IS_chosen$nonzero*3)
+P_nonzero <- nonzero(P_svd$P, P_multi_final$P, nonzeros = 107*3)
 
-
-
-# save(seed, IS_chosen,
-#      nonzero_range, P_svd_IS,
-#      W_svd, W_multi, W_multi_final, P_svd, P_multi, P_multi_final,
-#      file = "./autism_seed4360_P_IS_results.Rdata")
-
-P_nonzero
-
-W_nonzero
-
-WP_svd_nonzero
-
-WP_multi_nonzero
-
-
-apply(W_svd$Wraw[1:107,] != 0,2,sum)
-apply(W_svd$Wraw[108:1107,] != 0,2,sum)
-
-apply(W_multi_final$Wraw[1:107,] != 0,2,sum)
-apply(W_multi_final$Wraw[108:1107,] != 0,2,sum)
-
-
-
-apply(P_svd$P[1:107,] != 0,2,sum)
-apply(P_svd$P[108:1107,] != 0,2,sum)
-
-apply(P_multi_final$P[1:107,] != 0,2,sum)
-apply(P_multi_final$P[108:1107,] != 0,2,sum)
-
-
-
-P_svd_imp <- intersect(names(which(apply(P_svd$P, 1, function(x){sum(x) != 0}))), colnames(dat_subset[,1:107]))
-
-P_multi_imp <- intersect(names(which(apply(P_multi_final$P, 1, function(x){sum(x) != 0}))), colnames(dat_subset[,1:107]))
-
-intersect(P_svd_imp, P_multi_imp)
-
-length(intersect(P_svd_imp, P_multi_imp))
-
-rownames(W_svd$Wraw) <- colnames(dat_subset)
-rownames(W_multi_final$Wraw) <- colnames(dat_subset)
-
-W_svd_imp <- intersect(names(which(apply(W_svd$Wraw, 1, function(x){sum(x) != 0}))), colnames(dat_subset[,1:107]))
-
-W_multi_imp <- intersect(names(which(apply(W_multi_final$Wraw, 1, function(x){sum(x) != 0}))), colnames(dat_subset[,1:107]))
-
-length(intersect(W_svd_imp, W_multi_imp))
-
-
-
-plot(x = P_svd_IS$nonzero, y = P_svd_IS$IS)
-
-W_multi_vaf
-w_svd_vaf
-
-P_svd_vaf
-P_multi_vaf
-
-
-
-# plotting 3d pca #
-library(rgl)
-
-# W-svd #
-type_color <- as.numeric(type)
-
-w_svd_tmat <- dat_subset %*% W_svd$Wraw
-
-plot3d(w_svd_tmat[,c(1,3,2)], col=type_color, size=10, type='p')
-
-
-
-
-# W-multi #
-type_color <- as.numeric(type)
-
-w_multi_tmat <- dat_subset %*% W_multi_final$Wraw
-
-plot3d(w_multi_tmat[,c(1,3,2)], col=type_color, size=10, type='p')
-
-
-
-# P-svd #
-type_color <- as.numeric(type)
-
-P_svd_tmat <- P_svd$Tmat
-
-plot3d(P_svd_tmat[,c(1,3,2)], col=type_color, size=10, type='p')
-
-
-
-# P-multi #
-type_color <- as.numeric(type)
-
-P_multi_tmat <- P_multi_final$Tmat
-
-plot3d(P_multi_tmat[,c(1,3,2)], col=type_color, size=10, type='p')
